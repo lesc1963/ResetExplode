@@ -1,3 +1,5 @@
+> Histórico do primeiro incremento. Evidência atual: [validação do incremento 2](VALIDATION-2.md).
+
 # Validação do incremento 1
 
 Data: 2026-10-21 UTC. Ambiente utilizado exclusivamente: este Mac Mini `Macmini9,1`, Apple M1, arm64, 8 CPUs físicas, 8 GiB de RAM; macOS 27.0.1 (26A434). Ferramentas existentes: Apple Swift 6.4 (`swiftlang-6.4.0.34.1`, clang 2100.3.34.1), SDK macOS 27.0, Git 2.54.0 e GitHub CLI. Developer directory: `/Library/Developer/CommandLineTools`. Xcode completo e XCTest ausentes. Nenhuma dependência instalada.

@@ -4,21 +4,26 @@
 #include <libproc.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <sys/mount.h>
+
+static int re_error(void) { return errno == EACCES || errno == EPERM ? -2 : -1; }
 
 int re_cpu_ticks(RECPUTicks *out) {
-    host_cpu_load_info_data_t data;
+    host_cpu_load_info_data_t data = {0};
     mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
     mach_port_t host = mach_host_self();
     kern_return_t result = host_statistics(host, HOST_CPU_LOAD_INFO, (host_info_t)&data, &count);
     mach_port_deallocate(mach_task_self(), host);
-    if (result != KERN_SUCCESS) return -1;
+    if (result != KERN_SUCCESS) return result == KERN_NO_ACCESS ? -2 : -1;
+    if (count < HOST_CPU_LOAD_INFO_COUNT) return -1;
     *out = (RECPUTicks){data.cpu_ticks[CPU_STATE_USER], data.cpu_ticks[CPU_STATE_SYSTEM],
                        data.cpu_ticks[CPU_STATE_IDLE], data.cpu_ticks[CPU_STATE_NICE]};
     return 0;
 }
 
 int re_memory(REMemory *out) {
-    vm_statistics64_data_t data;
+    vm_statistics64_data_t data = {0};
     mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
     vm_size_t page_size;
     mach_port_t host = mach_host_self();
@@ -26,7 +31,9 @@ int re_memory(REMemory *out) {
     if (result == KERN_SUCCESS)
         result = host_statistics64(host, HOST_VM_INFO64, (host_info64_t)&data, &count);
     mach_port_deallocate(mach_task_self(), host);
-    if (result != KERN_SUCCESS) return -1;
+    if (result != KERN_SUCCESS) return result == KERN_NO_ACCESS ? -2 : -1;
+    if (!page_size || count * sizeof(integer_t) <
+        offsetof(vm_statistics64_data_t, compressor_page_count) + sizeof(data.compressor_page_count)) return -1;
     // Speculative pages are already included in free_count; do not count twice.
     *out = (REMemory){(uint64_t)data.free_count * page_size,
                      (uint64_t)data.active_count * page_size,
@@ -37,19 +44,21 @@ int re_memory(REMemory *out) {
 
 int re_sysctl_string(const char *key, char *out, size_t capacity) {
     size_t size = capacity;
-    if (!capacity || sysctlbyname(key, out, &size, NULL, 0) != 0) return -1;
+    if (!capacity) return -1;
+    if (sysctlbyname(key, out, &size, NULL, 0) != 0) return re_error();
     out[capacity - 1] = '\0';
     return 0;
 }
 
 int re_processes(REProcess *out, int capacity, int *partial) {
+    if (!partial) return -1;
     *partial = 0;
     if (!out || capacity < 1 || capacity > 4096) return -1;
     // Bounded snapshot; process list can change while reading.
     pid_t *pids = calloc((size_t)capacity, sizeof(pid_t));
     if (!pids) return -1;
     int count = proc_listallpids(pids, capacity * (int)sizeof(pid_t));
-    if (count <= 0) { free(pids); return -1; }
+    if (count <= 0) { int result = count < 0 ? re_error() : -1; free(pids); return result; }
     if (count >= capacity) { count = capacity; *partial = 1; }
     int written = 0;
     for (int i = 0; i < count; i++) {
@@ -64,5 +73,29 @@ int re_processes(REProcess *out, int capacity, int *partial) {
         out[written++] = row;
     }
     free(pids);
+    return written;
+}
+
+int re_volumes(REVolume *out, int capacity, int *partial) {
+    if (!partial) return -1;
+    *partial = 0;
+    if (!out || capacity < 1 || capacity > 256) return -1;
+    // MNT_NOWAIT returns cached kernel metadata; never waits for network filesystems.
+    struct statfs *mounts = calloc((size_t)capacity, sizeof(struct statfs));
+    if (!mounts) return -1;
+    int count = getfsstat(mounts, capacity * (int)sizeof(struct statfs), MNT_NOWAIT);
+    if (count < 0) { int result = re_error(); free(mounts); return result; }
+    if (count >= capacity) { count = capacity; *partial = 1; }
+    int written = 0;
+    for (int i = 0; i < count; i++) {
+        if (!(mounts[i].f_flags & MNT_LOCAL) || (mounts[i].f_flags & MNT_DONTBROWSE)) continue;
+        REVolume row = {0};
+        row.block_size = mounts[i].f_bsize;
+        row.total_blocks = mounts[i].f_blocks;
+        row.available_blocks = mounts[i].f_bavail;
+        strlcpy(row.mount_point, mounts[i].f_mntonname, sizeof(row.mount_point));
+        out[written++] = row;
+    }
+    free(mounts);
     return written;
 }

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import ResetCore
 
@@ -31,18 +32,25 @@ import Testing
 @Test func localCollectorSmoke() async throws {
     let snapshot = await MacCollector().collect()
     #expect(snapshot.cpuPercent == nil)
-    #expect(snapshot.system.logicalCPUs > 0)
-    #expect(snapshot.system.uptime > 0)
+    #expect(snapshot.notices.contains("CPU: aguardando intervalo válido entre amostras."))
+    #expect(try #require(snapshot.system.logicalCPUs) > 0)
+    #expect(try #require(snapshot.system.uptime) > 0)
     let memory = try #require(snapshot.memory)
-    #expect(memory.physical > 0)
-    #expect(memory.free <= memory.physical)
-    let disk = try #require(snapshot.disk)
-    #expect(disk.total > 0)
-    #expect(disk.available <= disk.total)
-    // Restricted environments may return partial/empty process lists; they must disclose it.
-    #expect(!snapshot.processes.isEmpty || snapshot.notices.contains { $0.hasPrefix("Processos:") })
-    #expect(Set(snapshot.processes.map(\.id)).count == snapshot.processes.count)
-    for row in snapshot.processes { #expect(row.id > 0) }
-    let rss = snapshot.processes.map(\.residentBytes)
-    #expect(rss == rss.sorted(by: >))
+    #expect(memory.isValid)
+    let volumes = try #require(snapshot.volumes)
+    #expect(!volumes.isEmpty)
+    #expect(Set(volumes.map(\.id)).count == volumes.count)
+    for volume in volumes {
+        if let capacity = volume.capacity { #expect(capacity.isValid) }
+        else { #expect(volume.issue != nil) }
+    }
+    // Metal discovery may return no accessible devices; this is an explicit empty inventory.
+    let gpus = try #require(snapshot.gpus)
+    for gpu in gpus { #expect(!gpu.name.isEmpty) }
+    if let processes = snapshot.processes {
+        #expect(Set(processes.map(\.id)).count == processes.count)
+        for row in processes { #expect(row.id > 0) }
+        let rss = processes.map(\.residentBytes)
+        #expect(rss == rss.sorted(by: >))
+    } else { #expect(snapshot.notices.contains { $0.hasPrefix("Processos:") }) }
 }

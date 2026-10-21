@@ -1,76 +1,97 @@
 import Foundation
-import CSystem
 
 public actor MacCollector: SnapshotCollecting {
+    private var source: any SystemDataSource
     private var previousTicks: CPUTicks?
-    public init() {}
+    private var previousCPUTime: TimeInterval?
+    private var inventoryTime: TimeInterval?
+    private var inventoryDate = Date()
+    private var cachedVolumes: [VolumeSnapshot]?
+    private var cachedGPUs: [GPUDeviceSnapshot]?
+    private var inventoryNotices: [String] = []
 
-    public func collect() async -> DashboardSnapshot {
+    public init() { source = NativeSystemSource() }
+    init(source: any SystemDataSource) { self.source = source }
+    public func resetCPU() { previousTicks = nil; previousCPUTime = nil }
+    public func collect() async -> DashboardSnapshot { collect(at: ProcessInfo.processInfo.systemUptime) }
+
+    // Monotonic time is injectable for deterministic interval/cache tests, without sleeps or hardware reads.
+    func collect(at time: TimeInterval) -> DashboardSnapshot {
         var notices: [String] = []
-        var rawTicks = RECPUTicks()
         var cpu: Double?
-        if re_cpu_ticks(&rawTicks) == 0 {
-            let ticks = CPUTicks(user: rawTicks.user, system: rawTicks.system, idle: rawTicks.idle, nice: rawTicks.nice)
-            cpu = CPUUsage.percent(previous: previousTicks, current: ticks)
-            previousTicks = ticks
-            if cpu == nil { notices.append("CPU: aguardando intervalo entre amostras.") }
-        } else {
-            previousTicks = nil
-            notices.append("CPU: leitura indisponível.")
-        }
-        let info = ProcessInfo.processInfo
-        var rawMemory = REMemory()
-        let memory: MemorySnapshot?
-        if re_memory(&rawMemory) == 0 {
-            memory = MemorySnapshot(physical: info.physicalMemory, free: rawMemory.free_bytes,
-                                    active: rawMemory.active_bytes, wired: rawMemory.wired_bytes,
-                                    compressed: rawMemory.compressed_bytes)
-        } else { memory = nil; notices.append("Memória: leitura indisponível.") }
-
-        let disk: DiskSnapshot?
         do {
-            let values = try URL(fileURLWithPath: NSHomeDirectory()).resourceValues(
-                forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityKey])
-            if let total = values.volumeTotalCapacity, let available = values.volumeAvailableCapacity,
-               total > 0, available >= 0 {
-                disk = DiskSnapshot(total: UInt64(total), available: UInt64(available))
-            } else { disk = nil; notices.append("Disco: capacidade indisponível.") }
-        } catch { disk = nil; notices.append("Disco: leitura indisponível.") }
-
-        var rows = [REProcess](repeating: REProcess(), count: 4096)
-        var partial: Int32 = 0
-        let count = rows.withUnsafeMutableBufferPointer { re_processes($0.baseAddress, Int32($0.count), &partial) }
-        var processes: [ProcessRow] = []
-        if count >= 0 {
-            processes = rows.prefix(Int(count)).map { row in
-                var name = row.name
-                let string = withUnsafeBytes(of: &name) { bytes in
-                    String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
-                }
-                return ProcessRow(id: row.pid, name: string.isEmpty ? "Sem nome" : string,
-                                  residentBytes: row.resident_bytes)
-            }.sorted { $0.residentBytes == $1.residentBytes ? $0.id < $1.id : $0.residentBytes > $1.residentBytes }
-            if partial != 0 { notices.append("Processos: lista parcial (permissões, processos encerrados ou limite de 4096).") }
-        } else { notices.append("Processos: lista indisponível.") }
-
-        let thermal: String
-        switch info.thermalState {
-        case .nominal: thermal = "Nominal"
-        case .fair: thermal = "Moderado"
-        case .serious: thermal = "Sério"
-        case .critical: thermal = "Crítico"
-        @unknown default: thermal = "Indisponível"
+            let ticks = try source.cpuTicks()
+            if let previousCPUTime, time > previousCPUTime,
+               time - previousCPUTime <= SamplingPolicy.maximumCPUInterval {
+                cpu = CPUUsage.percent(previous: previousTicks, current: ticks)
+            }
+            previousTicks = ticks; previousCPUTime = time
+            if cpu == nil { notices.append("CPU: aguardando intervalo válido entre amostras.") }
+        } catch {
+            resetCPU()
+            notices.append(Self.notice("CPU", error))
         }
-        return DashboardSnapshot(capturedAt: Date(), system: SystemSnapshot(
-            model: Self.readString("hw.model"), chip: Self.readString("machdep.cpu.brand_string"),
-            os: info.operatingSystemVersionString, logicalCPUs: info.processorCount,
-            uptime: info.systemUptime, thermalState: thermal), cpuPercent: cpu, memory: memory,
-            disk: disk, processes: processes, notices: notices)
-    }
+        let memory: MemorySnapshot?
+        do {
+            let value = try source.memory()
+            guard value.isValid else { throw ReadFailure.invalidData }
+            memory = value
+        } catch { memory = nil; notices.append(Self.notice("Memória", error)) }
+        let system: SystemSnapshot
+        do {
+            let value = try source.system()
+            system = SystemSnapshot(model: Self.nonempty(value.model), chip: Self.nonempty(value.chip),
+                                    os: Self.nonempty(value.os), logicalCPUs: value.logicalCPUs.flatMap { $0 > 0 ? $0 : nil },
+                                    uptime: value.uptime.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil },
+                                    thermalState: Self.nonempty(value.thermalState))
+        }
+        catch { system = .unavailable; notices.append(Self.notice("Sistema", error)) }
+        let processes: [ProcessRow]?
+        do {
+            let inventory = try source.processes()
+            var seen = Set<Int32>()
+            let rows = inventory.rows.prefix(SamplingPolicy.processLimit).filter { $0.id > 0 && seen.insert($0.id).inserted }
+            processes = rows.sorted { $0.residentBytes == $1.residentBytes ? $0.id < $1.id : $0.residentBytes > $1.residentBytes }
+            if inventory.partial || rows.count != inventory.rows.count {
+                notices.append("Processos: lista parcial (permissões, processos encerrados ou limite de 4096).")
+            }
+        } catch { processes = nil; notices.append(Self.notice("Processos", error)) }
 
-    private static func readString(_ key: String) -> String {
-        var buffer = [CChar](repeating: 0, count: 256)
-        guard re_sysctl_string(key, &buffer, buffer.count) == 0 else { return "Indisponível" }
-        return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        let inventoryDue = inventoryTime.map { time < $0 || time - $0 >= SamplingPolicy.inventorySeconds } ?? true
+        if inventoryDue {
+            // Replace failed readings with nil; never keep old capacities or capabilities as if freshly read.
+            inventoryNotices = []
+            do {
+                let inventory = try source.volumes()
+                var seen = Set<String>()
+                cachedVolumes = inventory.rows.prefix(SamplingPolicy.volumeLimit)
+                    .filter { !$0.id.isEmpty && seen.insert($0.id).inserted }
+                    .map { row in
+                        let valid = row.capacity?.isValid == true
+                        return VolumeSnapshot(id: row.id, name: row.name, capacity: valid ? row.capacity : nil,
+                                              issue: valid ? nil : row.issue ?? .unavailable)
+                    }
+                if inventory.partial || cachedVolumes?.count != inventory.rows.count {
+                    inventoryNotices.append("Volumes: inventário local parcial ou limitado a 256 entradas.")
+                }
+            } catch { cachedVolumes = nil; inventoryNotices.append(Self.notice("Volumes", error)) }
+            do {
+                cachedGPUs = try source.gpus().map { row in
+                    GPUDeviceSnapshot(id: row.id, name: row.name, unifiedMemory: row.unifiedMemory,
+                                      rayTracing: row.rayTracing,
+                                      recommendedWorkingSet: row.recommendedWorkingSet.flatMap { $0 > 0 ? $0 : nil })
+                }
+            } catch { cachedGPUs = nil; inventoryNotices.append(Self.notice("Metal", error)) }
+            inventoryTime = time; inventoryDate = Date()
+        }
+        return DashboardSnapshot(capturedAt: Date(), system: system, cpuPercent: cpu, memory: memory,
+                                 volumes: cachedVolumes, gpus: cachedGPUs, inventoryCapturedAt: inventoryDate,
+                                 processes: processes, notices: notices + inventoryNotices)
+    }
+    private static func nonempty(_ value: String?) -> String? {
+        value.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+    }
+    private static func notice(_ category: String, _ error: any Error) -> String {
+        "\(category): \((error as? ReadFailure ?? .unavailable).rawValue)."
     }
 }
