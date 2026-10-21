@@ -1,3 +1,5 @@
+> Registro posterior: [tentativa visual no Mini](VISUAL-CHECK.md), com processo encerrado e inspeção visual não confirmada por falha do serviço de interface. O resultado abaixo registra o build/testes anteriores à tentativa.
+
 # Validação do incremento 2
 
 Data: 2026-10-21 UTC. Ambiente permanece exclusivamente este Mac Mini M1 (`Macmini9,1`, arm64, 8 GiB), macOS 27.0.1 (26A434), Apple Swift 6.4 e Command Line Tools existentes. Base deste incremento: commit `c039d3b0a3bceef4f5c855cfe2644dd418b9dd32` da branch `macos-port`. Sem instalação de ferramentas/dependências. M5 e macOS mínimo declarado 14 continuam sem execução real.

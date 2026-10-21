@@ -48,6 +48,6 @@ swift test --jobs 2 --disable-xctest --scratch-path /tmp/resetexplode-validation
 
 O comando de testes executa somente código próprio; XCTest não está instalado neste Mini. O sandbox de execução do agente exigiu aprovação normal para o avaliador de manifests do SwiftPM; nenhuma configuração de segurança do Mac foi alterada. Os caminhos das ferramentas acima correspondem às Command Line Tools selecionadas neste Mini e devem ser ajustados ao usar Xcode completo.
 
-Não executar o binário GUI, benchmarks, scripts Windows, instaladores ou drivers como parte desta validação. Não há release, `.app`, entitlements privilegiados, serviço de background ou autostart. O workflow Windows herdado só pode executar no repositório original; nenhum CI novo é acionado no fork.
+Os comandos acima não abrem a GUI. A tentativa visual posterior está documentada em [VISUAL-CHECK.md](Docs/VISUAL-CHECK.md): processo iniciado/encerrado, sem captura ou inspeção visual confirmada. Não executar benchmarks, scripts Windows, instaladores ou drivers como parte destes testes. Não há release, bundle `.app` distribuível, entitlements privilegiados, serviço de background ou autostart. O workflow Windows herdado só pode executar no repositório original; nenhum CI novo é acionado no fork.
 
 Ver [matriz e plano](Docs/PORTABILITY.md) e [validação do incremento 2](Docs/VALIDATION-2.md) e [histórico do incremento 1](Docs/VALIDATION.md).
