@@ -35,3 +35,11 @@ Os 20 testes e o build do incremento 2 continuam aprovados, mas não substituem 
 Bloqueio exato: inspeção/captura da janela do port pelo serviço nativo Computer Use, que encerrou o canal antes de responder. Estado final: processo iniciado e encerrado com sucesso; janela e validação visual **não confirmadas**. Não houve negativa de Gatekeeper ou de segurança conhecida; sem screenshot não se afirma ausência de alerta. Não foi tentado contornar qualquer proteção nem repetir uma abertura com resultado incerto.
 
 Próximo passo: quando o serviço nativo de interface voltar a responder, repetir a sessão proposta na [matriz](PORTABILITY.md), no próprio Mini e com os mesmos limites. Nenhuma mudança no código foi inferida sem evidência da UI.
+
+## Segunda tentativa autorizada e fallback manual
+
+Em 2026-10-21, uma consulta única `cua.getState()` respondeu em 2,893 s sem abrir app. Isso confirmou apenas a listagem de aplicativos. Uma nova chamada de inspeção do nosso bundle, com limite solicitado de 10 s, voltou a não retornar imagem/AX e terminou com a mesma falha `Sky Computer Use native pipe closed before response`, após **3511,079 s**. O serviço não respeitou o limite solicitado; não se confunde essa espera com tempo de execução do app.
+
+Um monitor temporário exclusivo para nosso caminho foi iniciado antes da chamada, sem instância anterior. Ele aguardou oito minutos e finalizou sem detectar o processo; portanto, não estava mais ativo quando o serviço iniciou o app muito mais tarde. A consulta imediata após a falha encontrou somente nossa instância PID **53742**, tempo de execução **00:19**, CPU **0,0%**, RSS **124320 KiB**. O caminho foi reconferido e foi enviado SIGTERM apenas a esse PID; o término foi confirmado. A instância conhecida ficou ativa por menos de três minutos. Não há processo próprio conhecido pendente de limpeza. Não serão feitos novos ciclos de abertura pelo serviço instável.
+
+Nenhuma imagem/árvore AX recebida, nenhum prompt aceito ou proteção contornada. Permanecem sem validação visual os mesmos itens listados acima. O bloqueio é a inspeção nativa, não uma negativa conhecida de Gatekeeper. Como fallback, foi preparado um bundle local do próprio port fora do Git e documentado o [passo mínimo de revisão manual](MANUAL-REVIEW.md). Nenhum binário foi publicado, instalado ou executado novamente na preparação do pacote.

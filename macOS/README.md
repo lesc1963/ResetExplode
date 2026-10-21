@@ -51,3 +51,5 @@ O comando de testes executa somente código próprio; XCTest não está instalad
 Os comandos acima não abrem a GUI. A tentativa visual posterior está documentada em [VISUAL-CHECK.md](Docs/VISUAL-CHECK.md): processo iniciado/encerrado, sem captura ou inspeção visual confirmada. Não executar benchmarks, scripts Windows, instaladores ou drivers como parte destes testes. Não há release, bundle `.app` distribuível, entitlements privilegiados, serviço de background ou autostart. O workflow Windows herdado só pode executar no repositório original; nenhum CI novo é acionado no fork.
 
 Ver [matriz e plano](Docs/PORTABILITY.md) e [validação do incremento 2](Docs/VALIDATION-2.md) e [histórico do incremento 1](Docs/VALIDATION.md).
+
+Para inspeção manual após a falha do serviço nativo, ver [revisão visual manual](Docs/MANUAL-REVIEW.md). Há um bundle de avaliação apenas local, fora do Git; nenhuma validação visual ou compatibilidade M5 é declarada.
