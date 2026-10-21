@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.repository == 'GustavoReset/ResetExplode'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

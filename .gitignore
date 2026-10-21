@@ -18,3 +18,8 @@ ResetExplode-dist/
 
 # Drivers seriais embutidos (RESET MAKER): as DLLs fazem parte dos pacotes assinados
 !Drivers/**
+
+# Native macOS port: build products, SDK caches and local IDE state
+macOS/.build/
+macOS/.swiftpm/
+.DS_Store

@@ -1,3 +1,5 @@
+> **Port macOS em desenvolvimento neste fork:** veja [macOS/README.md](macOS/README.md) para o incremento SwiftUI somente leitura, [matriz](macOS/Docs/PORTABILITY.md) e limites de validação. O texto abaixo documenta o app Windows original.
+
 # RESET EXPLODE — v0.16
 
 > **Download oficial:** apenas em [github.com/GustavoReset/ResetExplode/releases](https://github.com/GustavoReset/ResetExplode/releases).
